@@ -1,33 +1,56 @@
-# Dockerfile
+# Imagen base con Python
+FROM python:3.10
 
-# 1) Base ligera
-FROM python:3.11-slim
-
-# 2) Variables para pip y logs
-ENV PIP_NO_CACHE_DIR=1 \
-    PYTHONUNBUFFERED=1 \
-    # Rutas donde apt instalará Chromium y Chromedriver
-    CHROME_BIN=/usr/bin/chromium \
-    CHROMEDRIVER_PATH=/usr/bin/chromedriver
-
-# 3) Instala Chromium + Chromedriver y limpia cache de apt
-RUN apt-get update \
-    && apt-get install -y chromium chromium-driver \
-    && rm -rf /var/lib/apt/lists/*
-
-# 4) Directorio de trabajo
+# Definir directorio de trabajo
 WORKDIR /app
 
-# 5) Copia e instala requirements
-COPY requirements.txt .
-RUN pip install --upgrade pip \
- && pip install -r requirements.txt
+# Instalar dependencias del sistema necesarias
+RUN apt-get update && apt-get install -y \
+    wget \
+    unzip \
+    gnupg \
+    curl \
+    fonts-liberation \
+    libasound2 \
+    libatk-bridge2.0-0 \
+    libatk1.0-0 \
+    libdrm2 \
+    libgbm1 \
+    libnspr4 \
+    libnss3 \
+    libx11-xcb1 \
+    libxcomposite1 \
+    libxdamage1 \
+    libxrandr2 \
+    xdg-utils \
+    xvfb \
+    && rm -rf /var/lib/apt/lists/*
 
-# 6) Copia el resto del proyecto
+# Instalar Google Chrome estable
+RUN wget -q -O - https://dl.google.com/linux/linux_signing_key.pub | apt-key add - \
+    && sh -c 'echo "deb [arch=amd64] http://dl.google.com/linux/chrome/deb/ stable main" >> /etc/apt/sources.list.d/google-chrome.list' \
+    && apt-get update && apt-get install -y google-chrome-stable \
+    && rm -rf /var/lib/apt/lists/*
+
+# Instalar Chromedriver (que coincida con Chrome)
+RUN CHROME_VERSION=$(google-chrome --version | awk '{print $3}') && \
+    CHROME_MAJOR=$(echo $CHROME_VERSION | cut -d'.' -f1) && \
+    wget -q https://chromedriver.storage.googleapis.com/LATEST_RELEASE_$CHROME_MAJOR -O /tmp/LATEST_RELEASE && \
+    CHROMEDRIVER_VERSION=$(cat /tmp/LATEST_RELEASE) && \
+    wget -q https://chromedriver.storage.googleapis.com/$CHROMEDRIVER_VERSION/chromedriver_linux64.zip -O /tmp/chromedriver.zip && \
+    unzip /tmp/chromedriver.zip -d /usr/local/bin/ && \
+    rm /tmp/chromedriver.zip /tmp/LATEST_RELEASE
+
+# Copiar requirements e instalarlos
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Copiar todo el proyecto
 COPY . .
 
-# 7) Crea carpetas necesarias
-RUN mkdir -p data output tmp_profiles
+# Instalar tini (para manejar bien los hilos/subprocesos)
+RUN apt-get update && apt-get install -y tini
+ENTRYPOINT ["/usr/bin/tini", "--"]
 
-# 8) Punto de entrada
-ENTRYPOINT ["python", "-m", "scraper.main"]
+# Comando por defecto → ejecutar tu main.py
+CMD ["python", "scraper/main.py"]
